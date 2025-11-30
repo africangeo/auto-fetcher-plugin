@@ -1,0 +1,4 @@
+/* Minimal professional admin styles */
+.wrap h1 { margin-bottom: 20px; }
+.form-table th { width: 220px; }
+textarea { font-family: monospace; }
