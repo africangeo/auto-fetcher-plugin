@@ -9,23 +9,20 @@ class Fetcher {
     public static function handle($is_manual = false) {
         $opts = get_option(Plugin::OPTION_KEY, Plugin::defaults());
 
-        // ensure category exists
-        $cat = get_category_by_slug('latest-jobs');
-        if (!$cat) {
-            $term = wp_insert_term('Latest Jobs', 'category', ['slug' => 'latest-jobs']);
-            $cat_id = is_wp_error($term) ? 0 : $term['term_id'];
-        } else {
-            $cat_id = $cat->term_id;
-        }
-
         if (empty($opts['sources']) || !is_array($opts['sources'])) {
             self::log('No sources configured');
             return;
         }
 
-        foreach ($opts['sources'] as $source) {
+        foreach ($opts['sources'] as $index => $source) {
             $source = trim($source);
             if ($source === '') continue;
+
+            $cat_id = 0;
+            if (!empty($opts['source_categories'][$index])) {
+                $cat_id = intval($opts['source_categories'][$index]);
+            }
+
             $posts = self::fetch_posts_from_source($source);
             if (!$posts || !is_array($posts)) continue;
             foreach ($posts as $p) {
@@ -134,9 +131,6 @@ class Fetcher {
             }
         }
 
-        // minimal button append
-        self::append_button($post_id);
-
         // RankMath
         if (class_exists('RankMath')) {
             $title = get_the_title($post_id);
@@ -169,39 +163,50 @@ class Fetcher {
     }
 
     public static function attach_remote_image($image_url, $post_id) {
-        // download & sideload
         require_once(ABSPATH . 'wp-admin/includes/file.php');
         require_once(ABSPATH . 'wp-admin/includes/media.php');
         require_once(ABSPATH . 'wp-admin/includes/image.php');
 
-        $tmp = download_url($image_url);
-        if (is_wp_error($tmp)) {
-            self::log('download_url failed: ' . $image_url);
+        $image_url = esc_url_raw($image_url);
+        if (empty($image_url)) {
+            self::log('Empty image URL provided');
             return false;
         }
-        $file = [
-            'name' => basename($image_url),
+
+        self::log('Downloading image: ' . $image_url);
+        $tmp = download_url($image_url, 30);
+        if (is_wp_error($tmp)) {
+            self::log('download_url failed: ' . $tmp->get_error_message());
+            return false;
+        }
+
+        $file_array = [
+            'name' => basename(parse_url($image_url, PHP_URL_PATH)),
             'tmp_name' => $tmp
         ];
-        $wp_filetype = wp_check_filetype($file['name']);
-        if (!in_array(strtolower($wp_filetype['ext']), ['jpg','jpeg','png','gif','webp'])) {
+
+        if (empty($file_array['name'])) {
+            $file_array['name'] = 'image-' . time() . '.jpg';
+        }
+
+        $wp_filetype = wp_check_filetype($file_array['name']);
+        if (empty($wp_filetype['ext']) || !in_array(strtolower($wp_filetype['ext']), ['jpg','jpeg','png','gif','webp','bmp'])) {
+            self::log('Invalid file type detected: ' . $wp_filetype['ext']);
             @unlink($tmp);
             return false;
         }
-        $attach_id = media_handle_sideload($file, $post_id);
+
+        $attach_id = media_handle_sideload($file_array, $post_id, null);
+
         if (is_wp_error($attach_id)) {
             @unlink($tmp);
-            self::log('media sideload error: ' . $attach_id->get_error_message());
+            self::log('media_handle_sideload error: ' . $attach_id->get_error_message());
             return false;
         }
-        set_post_thumbnail($post_id, $attach_id);
-        return $attach_id;
-    }
 
-    public static function append_button($post_id) {
-        $html = '<div style="text-align:center;margin-top:20px;"><a href="#" style="background:#0073aa;color:#fff;padding:10px 18px;border-radius:4px;text-decoration:none;">Latest Job vacancy</a></div>';
-        $current = get_post_field('post_content', $post_id);
-        wp_update_post(['ID' => $post_id, 'post_content' => $current . $html]);
+        set_post_thumbnail($post_id, $attach_id);
+        self::log('Successfully attached image ID ' . $attach_id . ' to post ' . $post_id);
+        return $attach_id;
     }
 
     public static function log($msg) {

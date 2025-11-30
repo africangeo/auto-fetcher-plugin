@@ -42,6 +42,7 @@ class Plugin {
     public static function defaults() {
         return [
             'sources' => [],
+            'source_categories' => [],
             'interval_seconds' => 300,
             'remove_from_title' => [],
             'remove_from_description' => [],

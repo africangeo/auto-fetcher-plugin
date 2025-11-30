@@ -87,17 +87,74 @@ class Settings {
 
     public static function page_sources() {
         $opts = get_option(Plugin::OPTION_KEY, Plugin::defaults());
+        $categories = get_categories(['hide_empty' => false]);
         ?>
         <div class="wrap">
             <h1>Sources</h1>
             <form method="post" action="<?php echo admin_url('admin-post.php'); ?>">
                 <input type="hidden" name="action" value="aspom_save_settings" />
                 <?php wp_nonce_field('aspom_save_settings_nonce'); ?>
-                <p>Enter one source per line. Examples: <code>https://example.com/wp-json</code> or <code>https://example.com/wp-json/wp/v2</code></p>
-                <textarea name="sources_raw" rows="8" cols="80"><?php echo esc_textarea(implode("\n", $opts['sources'])); ?></textarea>
+                <p>Configure REST API sources and assign categories to each source.</p>
+                <table class="form-table">
+                    <thead>
+                        <tr>
+                            <th style="width:60%;">REST API URL</th>
+                            <th style="width:40%;">Category</th>
+                        </tr>
+                    </thead>
+                    <tbody id="aspom-sources-list">
+                        <?php
+                        if (!empty($opts['sources'])) {
+                            foreach ($opts['sources'] as $idx => $source) {
+                                $cat_id = isset($opts['source_categories'][$idx]) ? intval($opts['source_categories'][$idx]) : 0;
+                                ?>
+                                <tr>
+                                    <td><input type="text" name="sources[]" value="<?php echo esc_attr($source); ?>" style="width:100%;" placeholder="https://example.com/wp-json" /></td>
+                                    <td>
+                                        <select name="source_categories[]" style="width:100%;">
+                                            <option value="0">-- No Category --</option>
+                                            <?php foreach ($categories as $cat) { ?>
+                                                <option value="<?php echo esc_attr($cat->term_id); ?>" <?php selected($cat_id, $cat->term_id); ?>><?php echo esc_html($cat->name); ?></option>
+                                            <?php } ?>
+                                        </select>
+                                    </td>
+                                </tr>
+                                <?php
+                            }
+                        } else {
+                            ?>
+                            <tr>
+                                <td><input type="text" name="sources[]" value="" style="width:100%;" placeholder="https://example.com/wp-json" /></td>
+                                <td>
+                                    <select name="source_categories[]" style="width:100%;">
+                                        <option value="0">-- No Category --</option>
+                                        <?php foreach ($categories as $cat) { ?>
+                                            <option value="<?php echo esc_attr($cat->term_id); ?>"><?php echo esc_html($cat->name); ?></option>
+                                        <?php } ?>
+                                    </select>
+                                </td>
+                            </tr>
+                            <?php
+                        }
+                        ?>
+                    </tbody>
+                </table>
+                <p><button type="button" class="button" id="aspom-add-source">Add Another Source</button></p>
+                <p class="description">Examples: <code>https://example.com/wp-json</code> or <code>https://example.com/wp-json/wp/v2</code></p>
                 <?php submit_button('Save Sources'); ?>
             </form>
         </div>
+        <script>
+        jQuery(document).ready(function($){
+            $('#aspom-add-source').on('click', function(){
+                var row = '<tr>' +
+                    '<td><input type="text" name="sources[]" value="" style="width:100%;" placeholder="https://example.com/wp-json" /></td>' +
+                    '<td><select name="source_categories[]" style="width:100%;"><option value="0">-- No Category --</option><?php foreach ($categories as $cat) { ?><option value="<?php echo esc_attr($cat->term_id); ?>"><?php echo esc_js($cat->name); ?></option><?php } ?></select></td>' +
+                    '</tr>';
+                $('#aspom-sources-list').append(row);
+            });
+        });
+        </script>
         <?php
     }
 
@@ -179,9 +236,13 @@ class Settings {
         $defaults = \AutoSyncPro\Plugin::defaults();
         $opts = get_option(\AutoSyncPro\Plugin::OPTION_KEY, $defaults);
 
-        if (isset($_POST['sources_raw'])) {
-            $lines = array_filter(array_map('trim', explode("\n", wp_unslash($_POST['sources_raw']))));
-            $opts['sources'] = array_values(array_unique($lines));
+        if (isset($_POST['sources'])) {
+            $sources = array_map('trim', array_map('esc_url_raw', $_POST['sources']));
+            $sources = array_filter($sources);
+            $opts['sources'] = array_values($sources);
+
+            $categories = isset($_POST['source_categories']) ? array_map('intval', $_POST['source_categories']) : [];
+            $opts['source_categories'] = $categories;
         }
 
         if (isset($_POST['interval_seconds'])) {
