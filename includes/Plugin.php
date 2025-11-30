@@ -74,14 +74,7 @@ class Plugin {
 
     public static function reschedule() {
         wp_clear_scheduled_hook(self::CRON_HOOK);
-        if (!wp_next_scheduled(self::CRON_HOOK)) {
-            wp_schedule_event(time(), 'aspom_custom_interval', self::CRON_HOOK);
-        } else {
-            // reschedule to new interval
-            $ts = wp_next_scheduled(self::CRON_HOOK);
-            if ($ts) wp_unschedule_event($ts, self::CRON_HOOK);
-            wp_schedule_event(time(), 'aspom_custom_interval', self::CRON_HOOK);
-        }
+        wp_schedule_event(time(), 'aspom_custom_interval', self::CRON_HOOK);
     }
 
     public static function ajax_manual_run() {

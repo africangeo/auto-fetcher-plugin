@@ -10,7 +10,8 @@ class Settings {
     public static function init() {
         add_action('admin_menu', [__CLASS__, 'menu']);
         add_action('admin_post_aspom_save_settings', [__CLASS__, 'save_settings']);
-        add_action('wp_ajax_aspom_manual_run_ajax', [__CLASS__, 'ajax_manual_run']); // redundant but fine
+        add_action('wp_ajax_aspom_manual_run_ajax', [__CLASS__, 'ajax_manual_run']);
+        add_action('admin_notices', [__CLASS__, 'show_cron_status']);
     }
 
     public static function enqueue_assets($hook) {
@@ -31,6 +32,29 @@ class Settings {
         add_submenu_page('aspom-settings', 'Sources', 'Sources', 'manage_options', 'aspom-sources', [__CLASS__, 'page_sources']);
         add_submenu_page('aspom-settings', 'Filters', 'Filters', 'manage_options', 'aspom-filters', [__CLASS__, 'page_filters']);
         add_submenu_page('aspom-settings', 'AI', 'AI', 'manage_options', 'aspom-ai', [__CLASS__, 'page_ai']);
+    }
+
+    public static function show_cron_status() {
+        if (!current_user_can('manage_options')) return;
+        $screen = get_current_screen();
+        if (!$screen || (strpos($screen->id, 'aspom') === false && strpos($screen->id, 'toplevel_page_aspom') === false)) return;
+
+        $next_run = wp_next_scheduled(Plugin::CRON_HOOK);
+        $last_run = get_option('aspom_last_run_time', 0);
+
+        if ($next_run) {
+            $time_diff = $next_run - time();
+            $next_run_display = $time_diff > 0 ? 'in ' . human_time_diff(time(), $next_run) : 'overdue';
+        } else {
+            $next_run_display = 'Not scheduled';
+        }
+
+        $last_run_display = $last_run ? human_time_diff($last_run) . ' ago' : 'Never';
+        ?>
+        <div class="notice notice-info" style="padding:12px;">
+            <p><strong>Auto Sync Pro Status:</strong> Next run: <code><?php echo esc_html($next_run_display); ?></code> | Last run: <code><?php echo esc_html($last_run_display); ?></code></p>
+        </div>
+        <?php
     }
 
     public static function page() {

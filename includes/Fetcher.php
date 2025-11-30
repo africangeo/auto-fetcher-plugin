@@ -7,6 +7,8 @@ if (!defined('ABSPATH')) exit;
 
 class Fetcher {
     public static function handle($is_manual = false) {
+        update_option('aspom_last_run_time', time());
+
         $opts = get_option(Plugin::OPTION_KEY, Plugin::defaults());
 
         if (empty($opts['sources']) || !is_array($opts['sources'])) {
