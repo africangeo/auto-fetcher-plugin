@@ -25,62 +25,66 @@ class AIClient {
         $orig_title = isset($input['original_title']) ? $input['original_title'] : '';
         $orig_desc = isset($input['original_description']) ? $input['original_description'] : '';
 
-        $prompt_parts = [];
-        if (!empty($title_inst)) {
-            $prompt_parts[] = "Title Enhancement: " . $title_inst;
-        }
-        if (!empty($desc_inst)) {
-            $prompt_parts[] = "Description Enhancement: " . $desc_inst;
-        }
-
-        if (empty($prompt_parts)) {
-            $this->log('AI generation skipped: no instructions provided');
+        if (empty($orig_title) && empty($orig_desc)) {
+            $this->log('AI generation skipped: no content provided');
             return false;
         }
-
-        $prompt = implode("\n\n", $prompt_parts);
-        $prompt .= "\n\nOriginal Title: " . $orig_title;
-        $prompt .= "\n\nOriginal Description: " . substr($orig_desc, 0, 1000);
-        $prompt .= "\n\nPlease provide the enhanced content.";
 
         $result = false;
         switch ($this->provider) {
             case 'openai':
-                $result = $this->callOpenAI($prompt);
+                $result = $this->callOpenAI($title_inst, $desc_inst, $orig_title, $orig_desc);
                 break;
             case 'openrouter':
-                $result = $this->callOpenRouter($prompt);
+                $result = $this->callOpenRouter($title_inst, $desc_inst, $orig_title, $orig_desc);
                 break;
             case 'gemini':
-                $result = $this->callGemini($prompt);
+                $result = $this->callGemini($title_inst, $desc_inst, $orig_title, $orig_desc);
                 break;
             default:
                 $this->log('Unknown AI provider: ' . $this->provider);
                 return false;
         }
 
-        if ($result && !empty($result['content'])) {
-            $generated_text = $result['content'];
-            return [
-                'title' => $generated_text,
-                'description' => $generated_text
-            ];
+        if ($result && (isset($result['title']) || isset($result['description']))) {
+            $this->log('AI generation successful');
+            return $result;
         }
 
         return false;
     }
 
-    protected function callOpenAI($prompt) {
+    protected function callOpenAI($title_inst, $desc_inst, $orig_title, $orig_desc) {
         $endpoint = 'https://api.openai.com/v1/chat/completions';
         $model = !empty($this->model) ? $this->model : 'gpt-4o-mini';
+
+        $system_prompt = 'You are a content enhancement assistant. You will receive content improvement instructions and return JSON with enhanced title and description fields.';
+
+        $user_prompt = "Instructions:\n";
+        if (!empty($title_inst)) {
+            $user_prompt .= "Title: " . $title_inst . "\n";
+        }
+        if (!empty($desc_inst)) {
+            $user_prompt .= "Description: " . $desc_inst . "\n";
+        }
+
+        $user_prompt .= "\nOriginal Content:\n";
+        if (!empty($orig_title)) {
+            $user_prompt .= "Title: " . $orig_title . "\n";
+        }
+        if (!empty($orig_desc)) {
+            $user_prompt .= "Description: " . substr($orig_desc, 0, 1500) . "\n";
+        }
+
+        $user_prompt .= "\nReturn only valid JSON in this exact format:\n{\"title\": \"enhanced title\", \"description\": \"enhanced description\"}";
 
         $payload = [
             'model' => $model,
             'messages' => [
-                ['role' => 'system', 'content' => 'You are a content enhancement assistant. Improve the provided content based on the instructions.'],
-                ['role' => 'user', 'content' => $prompt]
+                ['role' => 'system', 'content' => $system_prompt],
+                ['role' => 'user', 'content' => $user_prompt]
             ],
-            'max_tokens' => 800,
+            'max_tokens' => 1000,
             'temperature' => 0.7
         ];
 
@@ -111,25 +115,45 @@ class AIClient {
         }
 
         if (!empty($body['choices'][0]['message']['content'])) {
-            $this->log('OpenAI API call successful');
-            return ['content' => trim($body['choices'][0]['message']['content'])];
+            $response_text = trim($body['choices'][0]['message']['content']);
+            return $this->parseAIResponse($response_text);
         }
 
         $this->log('OpenAI API returned unexpected response format');
         return false;
     }
 
-    protected function callOpenRouter($prompt) {
+    protected function callOpenRouter($title_inst, $desc_inst, $orig_title, $orig_desc) {
         $endpoint = 'https://openrouter.ai/api/v1/chat/completions';
         $model = !empty($this->model) ? $this->model : 'openai/gpt-4o-mini';
+
+        $system_prompt = 'You are a content enhancement assistant. You will receive content improvement instructions and return JSON with enhanced title and description fields.';
+
+        $user_prompt = "Instructions:\n";
+        if (!empty($title_inst)) {
+            $user_prompt .= "Title: " . $title_inst . "\n";
+        }
+        if (!empty($desc_inst)) {
+            $user_prompt .= "Description: " . $desc_inst . "\n";
+        }
+
+        $user_prompt .= "\nOriginal Content:\n";
+        if (!empty($orig_title)) {
+            $user_prompt .= "Title: " . $orig_title . "\n";
+        }
+        if (!empty($orig_desc)) {
+            $user_prompt .= "Description: " . substr($orig_desc, 0, 1500) . "\n";
+        }
+
+        $user_prompt .= "\nReturn only valid JSON in this exact format:\n{\"title\": \"enhanced title\", \"description\": \"enhanced description\"}";
 
         $payload = [
             'model' => $model,
             'messages' => [
-                ['role' => 'system', 'content' => 'You are a content enhancement assistant. Improve the provided content based on the instructions.'],
-                ['role' => 'user', 'content' => $prompt]
+                ['role' => 'system', 'content' => $system_prompt],
+                ['role' => 'user', 'content' => $user_prompt]
             ],
-            'max_tokens' => 800,
+            'max_tokens' => 1000,
             'temperature' => 0.7
         ];
 
@@ -162,29 +186,47 @@ class AIClient {
         }
 
         if (!empty($body['choices'][0]['message']['content'])) {
-            $this->log('OpenRouter API call successful');
-            return ['content' => trim($body['choices'][0]['message']['content'])];
+            $response_text = trim($body['choices'][0]['message']['content']);
+            return $this->parseAIResponse($response_text);
         }
 
         $this->log('OpenRouter API returned unexpected response format');
         return false;
     }
 
-    protected function callGemini($prompt) {
+    protected function callGemini($title_inst, $desc_inst, $orig_title, $orig_desc) {
         $model = !empty($this->model) ? $this->model : 'gemini-pro';
         $endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/' . $model . ':generateContent?key=' . $this->api_key;
+
+        $user_prompt = "You are a content enhancement assistant. Return only valid JSON.\n\nInstructions:\n";
+        if (!empty($title_inst)) {
+            $user_prompt .= "Title: " . $title_inst . "\n";
+        }
+        if (!empty($desc_inst)) {
+            $user_prompt .= "Description: " . $desc_inst . "\n";
+        }
+
+        $user_prompt .= "\nOriginal Content:\n";
+        if (!empty($orig_title)) {
+            $user_prompt .= "Title: " . $orig_title . "\n";
+        }
+        if (!empty($orig_desc)) {
+            $user_prompt .= "Description: " . substr($orig_desc, 0, 1500) . "\n";
+        }
+
+        $user_prompt .= "\nReturn only valid JSON in this exact format:\n{\"title\": \"enhanced title\", \"description\": \"enhanced description\"}";
 
         $payload = [
             'contents' => [
                 [
                     'parts' => [
-                        ['text' => $prompt]
+                        ['text' => $user_prompt]
                     ]
                 ]
             ],
             'generationConfig' => [
                 'temperature' => 0.7,
-                'maxOutputTokens' => 800,
+                'maxOutputTokens' => 1000,
                 'topP' => 0.8,
                 'topK' => 40
             ]
@@ -216,11 +258,33 @@ class AIClient {
         }
 
         if (!empty($body['candidates'][0]['content']['parts'][0]['text'])) {
-            $this->log('Gemini API call successful');
-            return ['content' => trim($body['candidates'][0]['content']['parts'][0]['text'])];
+            $response_text = trim($body['candidates'][0]['content']['parts'][0]['text']);
+            return $this->parseAIResponse($response_text);
         }
 
         $this->log('Gemini API returned unexpected response format');
+        return false;
+    }
+
+    protected function parseAIResponse($response_text) {
+        $json = json_decode($response_text, true);
+
+        if (is_array($json)) {
+            $result = [];
+            if (!empty($json['title'])) {
+                $result['title'] = trim($json['title']);
+            }
+            if (!empty($json['description'])) {
+                $result['description'] = trim($json['description']);
+            }
+
+            if (!empty($result)) {
+                $this->log('Successfully parsed AI response: ' . wp_json_encode($result));
+                return $result;
+            }
+        }
+
+        $this->log('Failed to parse AI response as JSON: ' . substr($response_text, 0, 200));
         return false;
     }
 

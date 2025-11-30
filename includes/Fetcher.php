@@ -95,17 +95,26 @@ class Fetcher {
 
         // AI enrichment
         if (!empty($opts['ai_enabled']) && !empty($opts['ai_provider']) && !empty($opts['ai_api_key'])) {
-            $ai = new AIClient($opts['ai_provider'], $opts['ai_api_key'], $opts['ai_model']);
+            self::log('Attempting AI enrichment for post...');
+            $ai = new AIClient($opts['ai_provider'], $opts['ai_api_key'], isset($opts['ai_model']) ? $opts['ai_model'] : '');
             $ai_input = [
-                'title_instruction' => $opts['ai_instruction_title'],
-                'description_instruction' => $opts['ai_instruction_description'],
+                'title_instruction' => isset($opts['ai_instruction_title']) ? $opts['ai_instruction_title'] : '',
+                'description_instruction' => isset($opts['ai_instruction_description']) ? $opts['ai_instruction_description'] : '',
                 'original_title' => $title_raw,
                 'original_description' => wp_strip_all_tags($content_raw),
             ];
             $res = $ai->generate($ai_input);
             if ($res && is_array($res)) {
-                if (!empty($res['title'])) $title_raw = wp_strip_all_tags($res['title']);
-                if (!empty($res['description'])) $content_raw = wp_kses_post($res['description']);
+                if (!empty($res['title'])) {
+                    $title_raw = wp_strip_all_tags($res['title']);
+                    self::log('AI title updated');
+                }
+                if (!empty($res['description'])) {
+                    $content_raw = wp_kses_post($res['description']);
+                    self::log('AI description updated');
+                }
+            } else {
+                self::log('AI generation returned no results');
             }
         }
 
