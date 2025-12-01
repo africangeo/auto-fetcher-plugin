@@ -28,11 +28,11 @@ class Fetcher {
             $posts = self::fetch_posts_from_source($source);
             if (!$posts || !is_array($posts)) continue;
             foreach ($posts as $p) {
-                $slug = isset($p->slug) ? sanitize_title($p->slug) : '';
-                if (empty($slug)) {
-                    $slug = isset($p->title->rendered) ? sanitize_title($p->title->rendered) : 'aspom-' . uniqid();
+                $remote_id = isset($p->id) ? intval($p->id) : 0;
+                if (self::post_already_imported($remote_id, $source)) {
+                    self::log('Post ID ' . $remote_id . ' already imported from ' . $source);
+                    continue;
                 }
-                if (self::post_exists_by_slug($slug)) continue;
                 self::publish_post($p, $source, $cat_id, $opts);
             }
         }
@@ -58,8 +58,25 @@ class Fetcher {
         return [];
     }
 
-    public static function post_exists_by_slug($slug) {
-        $q = new \WP_Query(['name' => $slug, 'post_type' => 'post', 'posts_per_page' => 1]);
+    public static function post_already_imported($remote_id, $source_url) {
+        if ($remote_id <= 0) return false;
+        $args = [
+            'post_type' => 'post',
+            'posts_per_page' => 1,
+            'meta_query' => [
+                [
+                    'key' => '_aspom_remote_id',
+                    'value' => $remote_id,
+                    'compare' => '='
+                ],
+                [
+                    'key' => '_aspom_source_url',
+                    'value' => $source_url,
+                    'compare' => '='
+                ]
+            ]
+        ];
+        $q = new \WP_Query($args);
         return $q->have_posts();
     }
 
@@ -101,7 +118,7 @@ class Fetcher {
                 'title_instruction' => isset($opts['ai_instruction_title']) ? $opts['ai_instruction_title'] : '',
                 'description_instruction' => isset($opts['ai_instruction_description']) ? $opts['ai_instruction_description'] : '',
                 'original_title' => $title_raw,
-                'original_description' => wp_strip_all_tags($content_raw),
+                'original_description' => $content_raw,
             ];
             $res = $ai->generate($ai_input);
             if ($res && is_array($res)) {
@@ -132,6 +149,9 @@ class Fetcher {
             self::log('Failed insert: ' . print_r($postarr, true));
             return;
         }
+
+        update_post_meta($post_id, '_aspom_remote_id', isset($remote_post->id) ? intval($remote_post->id) : 0);
+        update_post_meta($post_id, '_aspom_source_url', $source_url);
 
         // featured image
         if (!empty($opts['fetch_featured_image'])) {
@@ -170,7 +190,17 @@ class Fetcher {
                 $image_url = $m[1];
             }
         }
-        if ($image_url) self::attach_remote_image($image_url, $post_id);
+        if ($image_url) {
+            $result = self::attach_remote_image($image_url, $post_id);
+            if ($result === false && !empty($remote_post->content->rendered)) {
+                self::log('Image failed to download, removing from content: ' . $image_url);
+                $content = get_post_field('post_content', $post_id);
+                $content = preg_replace('/<figure[^>]*>.*?<img[^>]*src=["\']' . preg_quote($image_url, '/') . '["\'][^>]*>.*?<\/figure>/is', '', $content);
+                $content = preg_replace('/<img[^>]*src=["\']' . preg_quote($image_url, '/') . '["\'][^>]*\s*\/?>/is', '', $content);
+                $content = preg_replace('/<p>\s*<\/p>/is', '', $content);
+                wp_update_post(['ID' => $post_id, 'post_content' => $content]);
+            }
+        }
     }
 
     public static function attach_remote_image($image_url, $post_id) {
@@ -196,13 +226,13 @@ class Fetcher {
             'tmp_name' => $tmp
         ];
 
-        if (empty($file_array['name'])) {
+        if (empty($file_array['name']) || strpos($file_array['name'], '.') === false) {
             $file_array['name'] = 'image-' . time() . '.jpg';
         }
 
         $wp_filetype = wp_check_filetype($file_array['name']);
         if (empty($wp_filetype['ext']) || !in_array(strtolower($wp_filetype['ext']), ['jpg','jpeg','png','gif','webp','bmp'])) {
-            self::log('Invalid file type detected: ' . $wp_filetype['ext']);
+            self::log('Invalid file type detected: ' . $wp_filetype['ext'] . ' for URL: ' . $image_url);
             @unlink($tmp);
             return false;
         }
