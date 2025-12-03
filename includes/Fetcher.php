@@ -29,8 +29,9 @@ class Fetcher {
             if (!$posts || !is_array($posts)) continue;
             foreach ($posts as $p) {
                 $remote_id = isset($p->id) ? intval($p->id) : 0;
-                if (self::post_already_imported($remote_id, $source)) {
-                    self::log('Post ID ' . $remote_id . ' already imported from ' . $source);
+                $slug = isset($p->slug) ? sanitize_title($p->slug) : '';
+                if (self::post_already_imported($remote_id, $source, $slug)) {
+                    self::log('Post already imported from ' . $source . ' (ID: ' . $remote_id . ', Slug: ' . $slug . ')');
                     continue;
                 }
                 self::publish_post($p, $source, $cat_id, $opts);
@@ -58,26 +59,48 @@ class Fetcher {
         return [];
     }
 
-    public static function post_already_imported($remote_id, $source_url) {
-        if ($remote_id <= 0) return false;
-        $args = [
-            'post_type' => 'post',
-            'posts_per_page' => 1,
-            'meta_query' => [
-                [
-                    'key' => '_aspom_remote_id',
-                    'value' => $remote_id,
-                    'compare' => '='
-                ],
-                [
-                    'key' => '_aspom_source_url',
-                    'value' => $source_url,
-                    'compare' => '='
+    public static function post_already_imported($remote_id, $source_url, $slug = '') {
+        // First check by remote_id if available
+        if ($remote_id > 0) {
+            $args = [
+                'post_type' => 'post',
+                'posts_per_page' => 1,
+                'meta_query' => [
+                    [
+                        'key' => '_aspom_remote_id',
+                        'value' => $remote_id,
+                        'compare' => '='
+                    ],
+                    [
+                        'key' => '_aspom_source_url',
+                        'value' => $source_url,
+                        'compare' => '='
+                    ]
                 ]
-            ]
-        ];
-        $q = new \WP_Query($args);
-        return $q->have_posts();
+            ];
+            $q = new \WP_Query($args);
+            if ($q->have_posts()) return true;
+        }
+
+        // Fallback: check by slug and source URL to prevent duplicates
+        if (!empty($slug)) {
+            $args = [
+                'post_type' => 'post',
+                'name' => $slug,
+                'posts_per_page' => 1,
+                'meta_query' => [
+                    [
+                        'key' => '_aspom_source_url',
+                        'value' => $source_url,
+                        'compare' => '='
+                    ]
+                ]
+            ];
+            $q = new \WP_Query($args);
+            if ($q->have_posts()) return true;
+        }
+
+        return false;
     }
 
     public static function publish_post($remote_post, $source_url, $cat_id, $opts) {
